@@ -1,0 +1,29 @@
+name: .NET Build Check
+
+# This tells GitHub to run this test every time you push code to the main branch
+on:
+  push:
+    branches: [ "main", "master" ]
+
+jobs:
+  build:
+    # This spins up a temporary Linux server to test your code
+    runs-on: ubuntu-latest
+
+    steps:
+    # 1. Download your code
+    - uses: actions/checkout@v4
+    
+    # 2. Install the .NET SDK
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: '8.0.x' # This installs the standard version of .NET
+        
+    # 3. Download Discord.Net and any other packages you installed
+    - name: Restore dependencies
+      run: dotnet restore
+      
+    # 4. The actual test: Try to compile the code!
+    - name: Build
+      run: dotnet build --no-restore
