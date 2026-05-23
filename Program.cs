@@ -57,6 +57,38 @@ async Task HandleCommandAsync(SocketMessage message)
 
         await message.Channel.SendMessageAsync(text: "", embed: embedBuilder.Build());
     }
+
+    if (message.Content == "!summarize")
+    {
+        // the bot will now send a message to the channel letting the user know that it is working
+        var loadingMsg = await message.Channel.SendMessageAsync("⏳ *Gathering the last 50 messages...*");
+
+        // This code now fetches the last 50 messages from the channel
+        var pastMessages = await message.Channel.GetMessagesAsync(50).FlattenAsync();
+
+        // This gathers all the texts in a document so that we can give it to the Gemini
+        string conversationLog = "";
+
+        // Now we will loop through the messages thats downloaded
+
+        foreach (var msg in pastMessages)
+        {
+            // we now get the messages but skip the message from the bot and the blank message above
+            if (msg.Author.IsBot || string.IsNullOrWhiteSpace(msg.Content)) continue;
+
+            // Now we will format it so Gemini knows exactly who said what
+            conversationLog += $"{msg.Author.Username}: {msg.Content}\n";
+
+            // building this to just see if this functions works but will be removed at a later stage
+            Console.WriteLine("--- Compiled Conversation log ---");
+            Console.WriteLine(conversationLog);
+            Console.WriteLine("---------------------------------");
+
+            // This will update the loading the messages
+            await loadingMsg.ModifyAsync(x => x.Content = "✅ *Messages gathered! Look at Visual Studio console.*");   
+        }
+
+    }
 }
 
 // You add your token in here
