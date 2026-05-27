@@ -1,5 +1,12 @@
 ﻿using Discord;
 using Discord.WebSocket;
+using System.ComponentModel.DataAnnotations;
+using System.Net.Http;
+using System.Text;
+using System.Text.Json;
+
+// Start of the file and the code //
+
 
 // Creating the bot client
 var config = new DiscordSocketConfig()
@@ -79,15 +86,76 @@ async Task HandleCommandAsync(SocketMessage message)
             // Now we will format it so Gemini knows exactly who said what
             conversationLog += $"{msg.Author.Username}: {msg.Content}\n";
 
-            // building this to just see if this functions works but will be removed at a later stage
-            Console.WriteLine("--- Compiled Conversation log ---");
-            Console.WriteLine(conversationLog);
-            Console.WriteLine("---------------------------------");
+            // This is how we call our Gemini API, you can replace this with your own API call if you want to use a different model
+            string keyPath = "gemini.txt";
+
+            // This is to check if there are any errors with calling the API
+            if (!File.Exists(keyPath))
+            {
+                await message.Channel.SendMessageAsync("⚠️ **Error:** API Key file is missing. The bot cannot contact the AI.");
+                Console.WriteLine("CRITICAL: gemini.txt not found. Make sure 'Copy to Output Directory' is set to 'Copy if newer'.");
+                return; // This stops the command from trying to continue
+            }
+
+            //Read the key (Trim ensures we remove any accidental spaces or new lines you might have copied)
+            string geminiKey = File.ReadAllText(keyPath).Trim();
+
+            //Make sure the file isn't completely empty
+            if (string.IsNullOrWhiteSpace(geminiKey))
+            {
+                await message.Channel.SendMessageAsync("⚠️ **Error:** API Key file is empty.");
+                return;
+            }
+
+            // Now we will create the HTTP client and the request to send to Gemini
+            using var httpClient = new HttpClient();
+            string url = $"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={geminiKey}";
+
+            //  We will now create a package for the data into a format that gemini will understand
+            var requestBody = new
+            {
+                contents = new[]
+                {
+                     new { parts = new[] { new { text = $"Please summarize the following chat log into 3 concise bullet points:\n\n{conversationLog}" } } }
+                }
+            };
+
+
+            // Now we will convert the JSON string into a universal format that all web API can understand
+            string jsonPayload = JsonSerializer.Serialize(requestBody);
+            var content = new StringContent(jsonPayload, Encoding.UTF8, "application/json");
+
+            //Now we will send the request to AI and get the response
+            var response = await httpClient.PostAsync(url, content);
+            string responseString = await response.Content.ReadAsStringAsync();
+
+            //Navigate through Google's JSON response to find just the text we want
+            using JsonDocument doc = JsonDocument.Parse(responseString);
+            string summaryText = doc.RootElement
+                .GetProperty("candidates")[0]
+                .GetProperty("content")
+                .GetProperty("parts")[0]
+                .GetProperty("text").GetString();
+
+            //Build a professional Embed for the final results
+            var embed = new EmbedBuilder()
+                .WithTitle("🤖 AI Channel Summary")
+                .WithDescription(summaryText)
+                .WithColor(Color.Blue)
+                .WithFooter("Powered by Gemini AI")
+                .WithCurrentTimestamp()
+                .Build();
+
+            //Edit the original "loading" message to show the final embed
+            await loadingMsg.ModifyAsync(x =>
+            {
+                x.Content = ""; // Clear the loading text
+                x.Embed = embed;
+            });
 
             // This will update the loading the messages
-            await loadingMsg.ModifyAsync(x => x.Content = "✅ *Messages gathered! Look at Visual Studio console.*");   
+            await loadingMsg.ModifyAsync(x => x.Content = "✅ *Messages gathered! Look at Visual Studio console.*");
         }
-
     }
 }
 
@@ -100,3 +168,6 @@ await client.StartAsync();
 
 // This will keep the program running forever, without this line the console will close once ASAP
 await Task.Delay(-1);
+
+
+// End of the file and the application //
