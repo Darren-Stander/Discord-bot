@@ -67,113 +67,116 @@ async Task HandleCommandAsync(SocketMessage message)
 
     if (message.Content == "!summarize")
     {
-        // the bot will now send a message to the channel letting the user know that it is working
-        var loadingMsg = await message.Channel.SendMessageAsync("⏳ *Gathering the last 10 messages...*");
-
-        // This code now fetches the last 10 messages from the channel
-        var pastMessages = await message.Channel.GetMessagesAsync(10).FlattenAsync();
-
-        // This gathers all the texts in a document so that we can give it to the Gemini
-        string conversationLog = "";
-
-        // Now we will loop through the messages thats downloaded
-
-        foreach (var msg in pastMessages)
+        _ = Task.Run(async () =>
         {
-            // we now get the messages but skip the message from the bot and the blank message above
-            if (msg.Author.IsBot || string.IsNullOrWhiteSpace(msg.Content)) continue;
+            // the bot will now send a message to the channel letting the user know that it is working
+            var loadingMsg = await message.Channel.SendMessageAsync("⏳ *Gathering the last 10 messages...*");
 
-            // Now we will format it so Gemini knows exactly who said what
-            conversationLog += $"{msg.Author.Username}: {msg.Content}\n";
+            // This code now fetches the last 10 messages from the channel
+            var pastMessages = await message.Channel.GetMessagesAsync(10).FlattenAsync();
 
-            // This is how we call our Gemini API, you can replace this with your own API call if you want to use a different model
-            string keyPath = "gemini.txt";
+            // This gathers all the texts in a document so that we can give it to the Gemini
+            string conversationLog = "";
 
-            // This is to check if there are any errors with calling the API
-            if (!File.Exists(keyPath))
+            // Now we will loop through the messages thats downloaded
+
+            foreach (var msg in pastMessages)
             {
-                await message.Channel.SendMessageAsync("⚠️ **Error:** API Key file is missing. The bot cannot contact the AI.");
-                Console.WriteLine("CRITICAL: gemini.txt not found. Make sure 'Copy to Output Directory' is set to 'Copy if newer'.");
-                return; // This stops the command from trying to continue
-            }
+                // we now get the messages but skip the message from the bot and the blank message above
+                if (msg.Author.IsBot || string.IsNullOrWhiteSpace(msg.Content)) continue;
 
-            //Read the key (Trim ensures we remove any accidental spaces or new lines you might have copied)
-            string geminiKey = File.ReadAllText(keyPath).Trim();
+                // Now we will format it so Gemini knows exactly who said what
+                conversationLog += $"{msg.Author.Username}: {msg.Content}\n";
 
-            //Make sure the file isn't completely empty
-            if (string.IsNullOrWhiteSpace(geminiKey))
-            {
-                await message.Channel.SendMessageAsync("⚠️ **Error:** API Key file is empty.");
-                return;
-            }
+                // This is how we call our Gemini API, you can replace this with your own API call if you want to use a different model
+                string keyPath = "gemini.txt";
 
-            // Now we will create the HTTP client and the request to send to Gemini
-            using var httpClient = new HttpClient();
-            string url = $"https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key={geminiKey}";
-
-            //  We will now create a package for the data into a format that gemini will understand
-            var requestBody = new
-            {
-                contents = new[]
+                // This is to check if there are any errors with calling the API
+                if (!File.Exists(keyPath))
                 {
-                     new { parts = new[] { new { text = $"Please summarize the following chat log into 3 concise bullet points:\n\n{conversationLog}" } } }
+                    await message.Channel.SendMessageAsync("⚠️ **Error:** API Key file is missing. The bot cannot contact the AI.");
+                    Console.WriteLine("CRITICAL: gemini.txt not found. Make sure 'Copy to Output Directory' is set to 'Copy if newer'.");
+                    return; // This stops the command from trying to continue
                 }
-            };
 
+                //Read the key (Trim ensures we remove any accidental spaces or new lines you might have copied)
+                string geminiKey = File.ReadAllText(keyPath).Trim();
 
-            // Now we will convert the JSON string into a universal format that all web API can understand
-            string jsonPayload = JsonSerializer.Serialize(requestBody);
-            var content = new StringContent(jsonPayload, Encoding.UTF8, "application/json");
-
-            //Now we will send the request to AI and get the response
-            var response = await httpClient.PostAsync(url, content);
-            string responseString = await response.Content.ReadAsStringAsync();
-            // --- DEBUGGING: Print the exact response to Visual Studio so we can see what Google said ---
-            Console.WriteLine("\n--- RAW GOOGLE API RESPONSE ---");
-            Console.WriteLine(responseString);
-            Console.WriteLine("-------------------------------\n");
-
-            // 6. Parse the JSON safely
-            using JsonDocument doc = JsonDocument.Parse(responseString);
-
-            // Defensive Check 1: Did Google send us an error object?
-            if (doc.RootElement.TryGetProperty("error", out JsonElement errorElement))
-            {
-                // Extract Google's specific error message
-                string errorMessage = errorElement.GetProperty("message").GetString();
-                await loadingMsg.ModifyAsync(x => x.Content = $"⚠️ **Google API Error:** {errorMessage}");
-                return; // Stop the code here
-            }
-
-            //Navigate through Google's JSON response to find just the text we want
-            if (doc.RootElement.TryGetProperty("candidates", out JsonElement candidates))
-            {
-                string summaryText = candidates[0]
-                    .GetProperty("content")
-                    .GetProperty("parts")[0]
-                    .GetProperty("text").GetString();
-
-                //Build a professional Embed for the final results
-                var embed = new EmbedBuilder()
-                            .WithTitle("🤖 AI Channel Summary")
-                            .WithDescription(summaryText)
-                            .WithColor(Color.Blue)
-                            .WithFooter("Powered by Gemini AI")
-                            .WithCurrentTimestamp()
-                            .Build();
-
-                await loadingMsg.ModifyAsync(x =>
+                //Make sure the file isn't completely empty
+                if (string.IsNullOrWhiteSpace(geminiKey))
                 {
-                    x.Content = "";
-                    x.Embed = embed;
-                });
+                    await message.Channel.SendMessageAsync("⚠️ **Error:** API Key file is empty.");
+                    return;
+                }
+
+                // Now we will create the HTTP client and the request to send to Gemini
+                using var httpClient = new HttpClient();
+                string url = $"https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key={geminiKey}";
+
+                //  We will now create a package for the data that will turn into a format that gemini will understand and be able to read
+                var requestBody = new
+                {
+                    contents = new[]
+                    {
+                     new { parts = new[] { new { text = $"Analyze the following chat log. First, identify the user who sent the most messages. Then, provide a short summary focused entirely on what that specific user said:\n\n{conversationLog}" } } }
+                }
+                };
+
+
+                // Now we will convert the JSON string into a universal format that all web API can understand
+                string jsonPayload = JsonSerializer.Serialize(requestBody);
+                var content = new StringContent(jsonPayload, Encoding.UTF8, "application/json");
+
+                //Now we will send the request to AI and get the response
+                var response = await httpClient.PostAsync(url, content);
+                string responseString = await response.Content.ReadAsStringAsync();
+                // --- DEBUGGING: Print the exact response to Visual Studio so we can see what Google said ---
+                Console.WriteLine("\n--- RAW GOOGLE API RESPONSE ---");
+                Console.WriteLine(responseString);
+                Console.WriteLine("-------------------------------\n");
+
+                // 6. Parse the JSON safely
+                using JsonDocument doc = JsonDocument.Parse(responseString);
+
+                // Defensive Check 1: Did Google send us an error object?
+                if (doc.RootElement.TryGetProperty("error", out JsonElement errorElement))
+                {
+                    // Extract Google's specific error message
+                    string errorMessage = errorElement.GetProperty("message").GetString();
+                    await loadingMsg.ModifyAsync(x => x.Content = $"⚠️ **Google API Error:** {errorMessage}");
+                    return; // Stop the code here
+                }
+
+                //Navigate through Google's JSON response to find just the text we want
+                if (doc.RootElement.TryGetProperty("candidates", out JsonElement candidates))
+                {
+                    string summaryText = candidates[0]
+                        .GetProperty("content")
+                        .GetProperty("parts")[0]
+                        .GetProperty("text").GetString();
+
+                    //Build a professional Embed for the final results
+                    var embed = new EmbedBuilder()
+                                .WithTitle("🤖 AI Channel Summary")
+                                .WithDescription(summaryText)
+                                .WithColor(Color.Blue)
+                                .WithFooter("Powered by Gemini AI")
+                                .WithCurrentTimestamp()
+                                .Build();
+
+                    await loadingMsg.ModifyAsync(x =>
+                    {
+                        x.Content = "";
+                        x.Embed = embed;
+                    });
+                }
+                else
+                {
+                    // If there's no error object BUT also no candidates (usually a safety filter block)
+                    await loadingMsg.ModifyAsync(x => x.Content = "⚠️ **Error:** The AI responded, but returned no summary. It may have been blocked by safety filters.");
+                }
             }
-            else
-            {
-                // If there's no error object BUT also no candidates (usually a safety filter block)
-                await loadingMsg.ModifyAsync(x => x.Content = "⚠️ **Error:** The AI responded, but returned no summary. It may have been blocked by safety filters.");
-            }
-        }
+        });
     }
 }
 
