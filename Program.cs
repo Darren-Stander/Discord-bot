@@ -68,10 +68,10 @@ async Task HandleCommandAsync(SocketMessage message)
     if (message.Content == "!summarize")
     {
         // the bot will now send a message to the channel letting the user know that it is working
-        var loadingMsg = await message.Channel.SendMessageAsync("⏳ *Gathering the last 50 messages...*");
+        var loadingMsg = await message.Channel.SendMessageAsync("⏳ *Gathering the last 10 messages...*");
 
-        // This code now fetches the last 50 messages from the channel
-        var pastMessages = await message.Channel.GetMessagesAsync(50).FlattenAsync();
+        // This code now fetches the last 10 messages from the channel
+        var pastMessages = await message.Channel.GetMessagesAsync(10).FlattenAsync();
 
         // This gathers all the texts in a document so that we can give it to the Gemini
         string conversationLog = "";
@@ -109,7 +109,7 @@ async Task HandleCommandAsync(SocketMessage message)
 
             // Now we will create the HTTP client and the request to send to Gemini
             using var httpClient = new HttpClient();
-            string url = $"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={geminiKey}";
+            string url = $"https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-latest:generateContent?key={geminiKey}";
 
             //  We will now create a package for the data into a format that gemini will understand
             var requestBody = new
@@ -128,33 +128,51 @@ async Task HandleCommandAsync(SocketMessage message)
             //Now we will send the request to AI and get the response
             var response = await httpClient.PostAsync(url, content);
             string responseString = await response.Content.ReadAsStringAsync();
+            // --- DEBUGGING: Print the exact response to Visual Studio so we can see what Google said ---
+            Console.WriteLine("\n--- RAW GOOGLE API RESPONSE ---");
+            Console.WriteLine(responseString);
+            Console.WriteLine("-------------------------------\n");
+
+            // 6. Parse the JSON safely
+            using JsonDocument doc = JsonDocument.Parse(responseString);
+
+            // Defensive Check 1: Did Google send us an error object?
+            if (doc.RootElement.TryGetProperty("error", out JsonElement errorElement))
+            {
+                // Extract Google's specific error message
+                string errorMessage = errorElement.GetProperty("message").GetString();
+                await loadingMsg.ModifyAsync(x => x.Content = $"⚠️ **Google API Error:** {errorMessage}");
+                return; // Stop the code here
+            }
 
             //Navigate through Google's JSON response to find just the text we want
-            using JsonDocument doc = JsonDocument.Parse(responseString);
-            string summaryText = doc.RootElement
-                .GetProperty("candidates")[0]
-                .GetProperty("content")
-                .GetProperty("parts")[0]
-                .GetProperty("text").GetString();
-
-            //Build a professional Embed for the final results
-            var embed = new EmbedBuilder()
-                .WithTitle("🤖 AI Channel Summary")
-                .WithDescription(summaryText)
-                .WithColor(Color.Blue)
-                .WithFooter("Powered by Gemini AI")
-                .WithCurrentTimestamp()
-                .Build();
-
-            //Edit the original "loading" message to show the final embed
-            await loadingMsg.ModifyAsync(x =>
+            if (doc.RootElement.TryGetProperty("candidates", out JsonElement candidates))
             {
-                x.Content = ""; // Clear the loading text
-                x.Embed = embed;
-            });
+                string summaryText = candidates[0]
+                    .GetProperty("content")
+                    .GetProperty("parts")[0]
+                    .GetProperty("text").GetString();
 
-            // This will update the loading the messages
-            await loadingMsg.ModifyAsync(x => x.Content = "✅ *Messages gathered! Look at Visual Studio console.*");
+                //Build a professional Embed for the final results
+                var embed = new EmbedBuilder()
+                            .WithTitle("🤖 AI Channel Summary")
+                            .WithDescription(summaryText)
+                            .WithColor(Color.Blue)
+                            .WithFooter("Powered by Gemini AI")
+                            .WithCurrentTimestamp()
+                            .Build();
+
+                await loadingMsg.ModifyAsync(x =>
+                {
+                    x.Content = "";
+                    x.Embed = embed;
+                });
+            }
+            else
+            {
+                // If there's no error object BUT also no candidates (usually a safety filter block)
+                await loadingMsg.ModifyAsync(x => x.Content = "⚠️ **Error:** The AI responded, but returned no summary. It may have been blocked by safety filters.");
+            }
         }
     }
 }
